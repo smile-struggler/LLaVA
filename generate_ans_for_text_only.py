@@ -139,7 +139,7 @@ def llava_output(query, image_file):
             max_new_tokens=max_new_tokens,
             use_cache=True,
         )
-        model(input_ids,images=images_tensor,image_sizes=image_sizes,use_cache=True,).logits
+        # model(input_ids,images=images_tensor,image_sizes=image_sizes,use_cache=True,).logits
         import pdb;pdb.set_trace()
     outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
     return outputs
