@@ -72,17 +72,17 @@ tokenizer, model, image_processor, context_len = load_pretrained_model(
 
 def llava_output(query, image_file):
     qs = query
-    image_token_se = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
-    if IMAGE_PLACEHOLDER in qs:
-        if model.config.mm_use_im_start_end:
-            qs = re.sub(IMAGE_PLACEHOLDER, image_token_se, qs)
-        else:
-            qs = re.sub(IMAGE_PLACEHOLDER, DEFAULT_IMAGE_TOKEN, qs)
-    else:
-        if model.config.mm_use_im_start_end:
-            qs = image_token_se + "\n" + qs
-        else:
-            qs = DEFAULT_IMAGE_TOKEN + "\n" + qs
+    # image_token_se = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
+    # if IMAGE_PLACEHOLDER in qs:
+    #     if model.config.mm_use_im_start_end:
+    #         qs = re.sub(IMAGE_PLACEHOLDER, image_token_se, qs)
+    #     else:
+    #         qs = re.sub(IMAGE_PLACEHOLDER, DEFAULT_IMAGE_TOKEN, qs)
+    # else:
+    #     if model.config.mm_use_im_start_end:
+    #         qs = image_token_se + "\n" + qs
+    #     else:
+    #         qs = DEFAULT_IMAGE_TOKEN + "\n" + qs
 
     if "llama-2" in model_name.lower():
         conv_mode = "llava_llama_2"
@@ -112,14 +112,14 @@ def llava_output(query, image_file):
     prompt = conv.get_prompt()
     import pdb;pdb.set_trace()
 
-    image_files = image_parser(image_file, sep)
-    images = load_images(image_files)
-    image_sizes = [x.size for x in images]
-    images_tensor = process_images(
-        images,
-        image_processor,
-        model.config
-    ).to(model.device, dtype=torch.float16)
+    # image_files = image_parser(image_file, sep)
+    # images = load_images(image_files)
+    # image_sizes = [x.size for x in images]
+    # images_tensor = process_images(
+    #     images,
+    #     image_processor,
+    #     model.config
+    # ).to(model.device, dtype=torch.float16)
 
     input_ids = (
         tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt")
@@ -130,8 +130,8 @@ def llava_output(query, image_file):
     with torch.inference_mode():
         output_ids = model.generate(
             input_ids,
-            images=images_tensor,
-            image_sizes=image_sizes,
+            images=None,
+            image_sizes=None,
             do_sample=True if temperature > 0 else False,
             temperature=temperature,
             top_p=top_p,
