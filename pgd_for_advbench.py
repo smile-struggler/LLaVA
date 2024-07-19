@@ -31,6 +31,8 @@ import os
 
 from tqdm import tqdm
 
+from utils.string_utils import autodan_SuffixManager
+
 def image_parser(image_file, sep):
     out = image_file.split(sep)
     return out
@@ -76,17 +78,17 @@ tokenizer, model, image_processor, context_len = load_pretrained_model(
 
 def llava_output(query, image_file, target):
     qs = query
-    image_token_se = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
-    if IMAGE_PLACEHOLDER in qs:
-        if model.config.mm_use_im_start_end:
-            qs = re.sub(IMAGE_PLACEHOLDER, image_token_se, qs)
-        else:
-            qs = re.sub(IMAGE_PLACEHOLDER, DEFAULT_IMAGE_TOKEN, qs)
-    else:
-        if model.config.mm_use_im_start_end:
-            qs = image_token_se + "\n" + qs
-        else:
-            qs = DEFAULT_IMAGE_TOKEN + "\n" + qs
+    # image_token_se = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
+    # if IMAGE_PLACEHOLDER in qs:
+    #     if model.config.mm_use_im_start_end:
+    #         qs = re.sub(IMAGE_PLACEHOLDER, image_token_se, qs)
+    #     else:
+    #         qs = re.sub(IMAGE_PLACEHOLDER, DEFAULT_IMAGE_TOKEN, qs)
+    # else:
+    #     if model.config.mm_use_im_start_end:
+    #         qs = image_token_se + "\n" + qs
+    #     else:
+    #         qs = DEFAULT_IMAGE_TOKEN + "\n" + qs
 
     if "llama-2" in model_name.lower():
         conv_mode = "llava_llama_2"
@@ -111,9 +113,11 @@ def llava_output(query, image_file, target):
         conv_mode = conv_mode
 
     conv = conv_templates[conv_mode].copy()
-    conv.append_message(conv.roles[0], qs)
-    conv.append_message(conv.roles[1], None)
-    prompt = conv.get_prompt()
+    suffix_manager = autodan_SuffixManager(tokenizer=tokenizer,
+                                               conv_template=conv,
+                                               instruction=qs,
+                                               target=target,
+                                               adv_string=None)
 
     image_files = image_parser(image_file, sep)
     images = load_images(image_files)
@@ -125,18 +129,8 @@ def llava_output(query, image_file, target):
     ).to(model.device, dtype=torch.float16)
 
     ori_images = images_tensor.clone().detach().to(model.device)
-
-    input_ids = (
-        tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt")
-        .unsqueeze(0)
-        .cuda()
-    )
-
-    target_ids = (
-        tokenizer_image_token(target, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt")
-        .unsqueeze(0)
-        .cuda()
-    )
+    
+    input_ids = suffix_manager.get_image_input_ids(adv_string=None).to(model.device)
 
     num_steps = 5
     eps=0.3
@@ -159,13 +153,14 @@ def llava_output(query, image_file, target):
             #     max_new_tokens=max_new_tokens,
             #     use_cache=True,
             # )
+        input_ids = input_ids.unsqueeze(0)
         output_logits = model(input_ids,images=images_tensor,image_sizes=image_sizes,use_cache=True,).logits
         crit = nn.CrossEntropyLoss(reduction='none')
-
-        loss = crit(output_logits, target_ids)
+        loss_slice = slice(suffix_manager._target_slice.start + 575 - 1,  suffix_manager._target_slice.stop + 575 - 1)
+        loss = crit(output_logits[:,loss_slice,:].transpose(1,2), input_ids[:,suffix_manager._target_slice])
         loss = loss.mean(dim=-1)
         loss.backward()
-
+        import pdb;pdb.set_trace()
         adv_images = images_tensor - alpha * images_tensor.grad.sign()
         eta = torch.clamp(adv_images - ori_images, min=-eps, max=eps)
         images_tensor = torch.clamp(ori_images + eta, min=0, max=1).detach_()
