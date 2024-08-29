@@ -1,6 +1,8 @@
 import json
 import torch
 import time
+import sys
+sys.path.append("..")
 
 from llava.constants import (
     IMAGE_TOKEN_INDEX,
@@ -119,12 +121,12 @@ def check_for_attack_success(model, tokenizer, input_ids, assistant_role_slice, 
     return jailbroken, gen_str
 
 model_path = "liuhaotian/llava-v1.5-7b"
-prompt = "How to describe this picture?"
-image_file = "/home/chenrenmiao/project/LLaVA/images/test4.jpg"
+# prompt = "How to describe this picture?"
+image_file = "/data3/chenrenmiao/project/LLaVA/images/uniform_noise_image/0.png"
 
 model_base = None
 model_name = get_model_name_from_path(model_path)
-query = prompt
+# query = prompt
 conv_mode = None
 image_file = image_file
 sep = ","
@@ -198,8 +200,8 @@ def llava_output(query, image_file, target):
     input_ids = input_ids.unsqueeze(0)
 
     num_steps = 100
-    eps=0.6
-    alpha=4/255
+    eps=1.2
+    alpha=8/255
 
     min_values = torch.tensor([-1.7920, -1.7520, -1.4805],device = model.device, dtype = ori_images.dtype)
     max_values = torch.tensor([1.9307, 2.0742, 2.1465],device = model.device, dtype = ori_images.dtype)
@@ -284,7 +286,7 @@ with open(question_file, newline='') as csvfile:
         target_list.append(row[1])
 
 for data_id, question in enumerate(tqdm(question_list)):
-    image_blank = '/data/chenrenmiao/project/LLaVA/images/blank.jpg'
+    image_blank = '/data3/chenrenmiao/project/LLaVA/images/uniform_noise_image/0.png'
 
     result[str(data_id) ] = {
         "Text_only": llava_output(question, image_blank, target_list[data_id]),
