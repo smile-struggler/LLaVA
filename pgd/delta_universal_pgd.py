@@ -122,6 +122,7 @@ def check_for_attack_success(model, tokenizer, input_ids, assistant_role_slice, 
 
 model_path = "liuhaotian/llava-v1.5-7b"
 # prompt = "How to describe this picture?"
+
 model_base = None
 model_name = get_model_name_from_path(model_path)
 # query = prompt
@@ -139,34 +140,37 @@ tokenizer, model, image_processor, context_len = load_pretrained_model(
     model_path, model_base, model_name
 )
 
-question_file = '/data/chenrenmiao/project/AutoDAN/data/advbench/harmful_behaviors.csv'
-result_file = "/data/chenrenmiao/project/Llama-guard2/advbench/advbench_withsuffix_result.json"
+question_file = '/data/chenrenmiao/data/MM-SafetyBench/processed_questions/01-Illegal_Activitiy.json'
+image_file_path = '/data/chenrenmiao/data/MM-SafetyBench/img/01-Illegal_Activitiy'
 
-result = {}
-
+data_id_list = []
 question_list = []
 target_list = []
+image_file_list = []
 
-with open(question_file, newline='') as csvfile:
-    reader = csv.reader(csvfile)
-    
-    next(reader)
-    
-    for row in reader:
-        question_list.append(row[0])
-        target_list.append(row[1])
+with open(question_file, 'r', encoding='utf-8') as file:
+    data = json.load(file)
+
+for data_id in tqdm(data):
+    question = data[data_id]['Question']
+    image_SD_TYPO = os.path.join(image_file_path, 'SD_TYPO', f'{data_id}.jpg')
+
+    data_id_list.append(data_id)
+    question_list.append(question)
+    target_list.append('Sure')
+    image_file_list.append(image_SD_TYPO)
 
 # Take the first 5 and attack
-attack_list = [5,6,7,8,9]
+attack_list = [0,1,2,3,4]
 attack_question_num = len(attack_list)
 attack_question_list = [question_list[i] for i in attack_list]
 attack_target_list = [target_list[i] for i in attack_list]
+image_file_list = ",".join([image_file_list[i] for i in attack_list])
+
 
 # attack_question_num = 3
 # attack_question_list = question_list[:attack_question_num]
 # attack_target_list = target_list[:attack_question_num]
-origin_image = '/data3/chenrenmiao/project/LLaVA/images/uniform_noise_image/0.png'
-
 # qs = query
 # image_token_se = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
 # if IMAGE_PLACEHOLDER in qs:
@@ -213,7 +217,7 @@ for id in range(len(attack_question_list)):
                                             target=attack_target_list[id],
                                             adv_string=None))
 
-image_files = image_parser(origin_image, sep)
+image_files = image_parser(image_file_list, sep)
 images = load_images(image_files)
 image_sizes = [x.size for x in images]
 images_tensor = process_images(
@@ -238,8 +242,8 @@ input_ids_list = torch.nn.utils.rnn.pad_sequence(
 attention_mask = input_ids_list.ne(tokenizer.pad_token_id)
 
 num_steps = 300
-eps=0.6
-alpha=32/255
+eps=1.2
+alpha=8/255
 
 min_values = torch.tensor([-1.7920, -1.7520, -1.4805],device = model.device, dtype = ori_images.dtype)
 max_values = torch.tensor([1.9307, 2.0742, 2.1465],device = model.device, dtype = ori_images.dtype)
@@ -247,8 +251,11 @@ max_values = torch.tensor([1.9307, 2.0742, 2.1465],device = model.device, dtype 
 min_values = min_values.view(1, 3, 1, 1)
 max_values = max_values.view(1, 3, 1, 1)
 
-images_tensor = ori_images.repeat(attack_question_num, 1, 1, 1)
-image_sizes_list = image_sizes * attack_question_num
+# images_tensor = ori_images.repeat(attack_question_num, 1, 1, 1)
+# image_sizes_list = image_sizes * attack_question_num
+
+# 初始化统一扰动
+uniform_perturbation = torch.zeros_like(images_tensor[0])
 
 for i in range(num_steps):
     epoch_start_time = time.time()
@@ -269,7 +276,7 @@ for i in range(num_steps):
         #     max_new_tokens=max_new_tokens,
         #     use_cache=True,
         # )
-    output_logits = model(input_ids_list,attention_mask=attention_mask,images=images_tensor,image_sizes=image_sizes_list,use_cache=True,).logits
+    output_logits = model(input_ids_list,attention_mask=attention_mask,images=images_tensor,image_sizes=image_sizes,use_cache=True,).logits
     crit = nn.CrossEntropyLoss(reduction='none')
     loss_list = []
     for id, suffix_manager in enumerate(suffix_manager_list):
@@ -281,12 +288,12 @@ for i in range(num_steps):
     loss = stacked_loss.mean()
     loss.backward()
     
-    # adv_images = images_tensor[0] - alpha * images_tensor.grad.mean(dim=0).sign()
-    # eta = torch.clamp(adv_images - ori_images, min=-eps, max=eps)
-    # images_tensor = torch.clamp(ori_images + eta, min=min_values, max=max_values).detach_()
+    # 更新统一扰动
+    uniform_perturbation -= alpha * images_tensor.grad.mean(dim=0).sign()
+    uniform_perturbation = torch.clamp(uniform_perturbation, min=-eps, max=eps)
 
-    adv_images = images_tensor[0] - alpha * images_tensor.grad.mean(dim=0).sign()
-    images_tensor = torch.clamp(adv_images, min=min_values, max=max_values).detach_()
+    # 重置 images_tensor 为原始图像加上当前统一扰动，保证在 [min_values, max_values] 范围内
+    images_tensor = torch.clamp(ori_images + uniform_perturbation, min=min_values, max=max_values).detach()
     
     success_num = 0
     for id, suffix_manager in enumerate(suffix_manager_list):
@@ -308,7 +315,6 @@ for i in range(num_steps):
         print(f"Current Response:\n{gen_str}\n")
         print("**********************")
 
-    images_tensor = images_tensor.repeat(attack_question_num, 1, 1, 1)
     epoch_end_time = time.time()
     epoch_cost_time = round(epoch_end_time - epoch_start_time, 2)
     print(
@@ -325,11 +331,11 @@ for i in range(num_steps):
     if success_num == attack_question_num:
         norm_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073])
         norm_std = torch.tensor([0.26862954, 0.26130258, 0.27577711])
-        result_image = images_tensor[0].cpu() * norm_std[:,None,None] + norm_mean[:,None,None]
+        result_image = uniform_perturbation.cpu() * norm_std[:,None,None] + norm_mean[:,None,None]
         result_image = result_image * 255
         result_image = result_image.byte()
         img = Image.fromarray(result_image.permute(1, 2, 0).cpu().numpy(), 'RGB')
-        img.save('../images/uniform_noise_image/unlimit_attack_image_1.png')
+        img.save('../images/uniform_noise_image/delta_universal_img.png')
         import pdb;pdb.set_trace()
         break
 noise = images_tensor - ori_images

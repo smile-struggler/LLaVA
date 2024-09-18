@@ -2,7 +2,7 @@ import numpy as np
 from PIL import Image
 
 # 设置一个具体的随机种子，确保每次生成的图片都相同
-random_seed = 0
+random_seed = 1
 np.random.seed(random_seed)  # 你可以选择任何整数作为种子
 
 # 生成3x336x336的高斯随机数
